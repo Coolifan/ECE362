@@ -1,0 +1,168 @@
+; Generic assembly source file for testing code segments
+
+        org     $800    ; location 800h is the beginning of SRAM
+        ldaa    #$CC  ; load first operand
+        oraa    $900  ; instruction(s) being tested (with second operand)
+        staa    result  ; store result
+        stop		; (use location of STOP instruction for setting breakpoint)
+        
+        org     $900    ; place operand data at location 900h
+opand1  fcb     $55     ; test data
+result  fcb     0       ; place to store result (initially cleared)
+        end
+        
+        
+
+
+4-B
+
+; Generic assembly source file for testing code segments
+
+        org     $800    ; location 800h is the beginning of SRAM
+        ldaa    #$22  ; load first operand
+        adda    $900  ; instruction(s) being tested (with second operand)
+        stop		; (use location of STOP instruction for setting breakpoint)
+        
+        org     $900    ; place operand data at location 900
+        fcb     $11     ; test data
+        end
+        
+4-C
+; Generic assembly source file for testing code segments
+
+        org     $800
+        ldaa    #22h    
+        ldx     #900h  
+        adda    1,X   
+        stop		
+        
+        org     $900    
+        fcb     $10     
+        fcb     $11
+        end
+4-d
+; Generic assembly source file for testing code segments
+
+        org     $800
+        ldaa    #22h    
+        ldx     #900h  
+        adda    $17,X   
+        stop		
+        
+        org     $917    
+        fcb     $10     
+        fcb     $11
+        end
+
+
+
+
+   4-E     
+ ; Generic assembly source file for testing code segments
+
+        org     $800
+        ldaa    #22h    
+        ldx     #900h  
+        adda    $256,X   
+        stop		
+        
+        org     $b56    
+        fcb     $10     
+        
+        end
+ 4-F
+; Generic assembly source file for testing code segments
+
+        org     $800
+        ldaa    #22h    
+        ldx     #900h  
+        adda    A,X   
+        stop		
+        
+        org     $922    
+        fcb     $10
+        
+        end
+        
+4-G
+; Generic assembly source file for testing code segments
+
+        org     $800
+        ldaa    #22h    
+        ldx     #900h  
+        adda    1,X+   
+        stop		
+        
+        org     $900    
+        fcb     $10
+        
+        end
+    4-H
+        
+          ; Generic assembly source file for testing code segments
+
+        org     $800
+        ldaa    #22h    
+        ldx     #900h  
+        adda    1,-X   
+        stop		
+        
+        org     $8ff    
+        fcb     $10
+        
+        end
+        
+        4I
+; Generic assembly source file for testing code segments
+
+        org     $800
+           
+        ldx     #900h 
+        ;ldd     #2200h
+        ldaa    #$22
+        adda    [1,X]   
+        stop		
+        
+        org     $900    
+        fcb     $10
+        fcb     $20
+        fcb     $30
+        
+        org     $2030
+        fcb     $5
+        
+        
+        end
+        
+            
+4J
+
+
+
+
+; Generic assembly source file for testing code segments
+
+        org     $800
+           
+        ldx     #900h 
+        ldd     $950
+        
+        adda    [D,X]   
+        stop		
+        
+        
+        org     $950
+        fcb     $60
+        fcb     $70
+        
+        org     $6970
+        fcb     $80 
+        fcb     $90
+        
+        org     $8090
+        fcb     $5
+
+       
+        
+        
+        end   

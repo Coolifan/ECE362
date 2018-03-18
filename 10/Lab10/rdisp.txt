@@ -1,0 +1,38 @@
+int percent;
+    int totalbar;
+    int maxrpm = 240;
+    int i = 0;
+
+    send_i(LCDCLR);
+    
+    pulscnt = PACNT/28*60/64;  //64pulses per revolution, gear ratio 28, 60sec per min
+    percent = pulscnt / maxrpm * 100;
+    if(percent > 100) {
+    	percent = 100;
+    }
+
+    chgline(LINE1);
+    print_c((pulscnt/100)%10 + 0x30);
+    print_c((pulscnt/10)%10 + 0x30);
+    print_c((pulscnt%10) + 0x30);
+    pmsglcd(" RPM");
+
+    chgline(LINE2);
+    totalbar = percent / 10;
+
+ 	  for(i=0; i<totalbar; i++){
+ 		  print_c(0xFF);
+ 	  }
+ 	  while(i<12){
+ 		  pmsglcd(" ");
+ 		  i++;
+ 	  }
+ 	
+ 	  if(percent == 100) {
+ 		  pmsglcd("100%");
+ 	  }
+ 	  else{
+ 		  print_c(' '); //null (blank) 0x20
+ 		  print_c(percent/10 + 0x30);
+ 		  pmsglcd("0%");
+ 	}

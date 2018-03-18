@@ -1,0 +1,142 @@
+1A
+
+        org     $800      
+        MOVW    #$1000,$900   
+        stop		
+        
+        org     $900    
+        fcb     $33
+        fcb     $44     
+    
+    
+        end
+
+1B
+
+        org     $800
+        ldaa    #22h 
+        ldy     #888h   
+        ldx     #900h  
+        LEAY    A,X   
+        stop		
+           
+  
+        end
+
+1C
+      	org     $800
+        ldaa    #22h 
+        ldab    #33h 
+        
+        lds     #1000h  
+  
+        PSHA    
+        PSHB
+        PULD  
+        stop   
+
+2A
+
+        org     $800
+        
+        ldab    #33h 
+        addb    #-19h
+        ADCB    #19h
+   
+        stop   
+
+2B
+        org     $800
+        
+        ldd     #1122h 
+        
+        ADDD    $900
+   
+        stop   
+        
+        org     $900
+        fcb     $12
+        fcb     $34
+2C
+	org $800
+	ldaa #5h
+	ADDA #9h
+	DAA
+	stop
+
+
+2D
+        org     $800
+        
+        ldaa    #17h 
+        SUBA    #9h
+        DAA
+        stop   
+        
+ 2E
+
+        org     $800
+        
+        ldd     #17h 
+        ldy     #9h
+        EMUL
+        stop   
+        
+ 2F
+
+        org     $800
+        
+        ldd     #4h 
+        ldx     #8h
+        FDIV
+        stop   
+        
+ 3A
+        org     $800
+        
+        ldd     #0111h 
+        
+        LSLA
+        stop   
+        
+ 3b
+        org     $800
+        
+        ldd     #1010H 
+        
+        rorb
+        stop   
+        
+ 3C
+        org     $800
+        
+        ldx     #1000h    
+        CPX     $900
+        stop   
+        
+        org     $900
+        fcb     $10
+        fcb     $10
+ 3D
+        org     $800
+        
+        ldx     #1000h    
+        CPX     $900
+        ANDCC   #0000h
+        stop   
+        
+        org     $900
+        fcb     $10
+        fcb     $10
+ 3E
+        org     $800
+        
+        ldx     #1000h    
+        CPX     $900
+        ORCC    #$f
+        stop   
+        
+        org     $900
+        fcb     $10
+        fcb     $10
+ 

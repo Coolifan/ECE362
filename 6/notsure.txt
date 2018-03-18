@@ -1,0 +1,362 @@
+;***********************************************************************
+;
+; The objective of this experiment is to implement a Big More-Than-Ten
+; 19-second play clock on the 9S12C32 development kit.  A waveform
+; generator will be used to provide a 100 Hz periodic interrupt. A
+; GAL22V10 will be used to provide the requisite interfacing logic,
+; which includes an interrupt device flag and a BCD-to-display-code
+; decoder for driving a pair of common-anode 7-segment LEDs (see
+; lab description document for details). Note that this application
+; is intended to run in a "turn-key" fashion. 
+;
+; The following docking board resources will be used:
+;
+; - left pushbutton (PAD7): shot clock reset
+; - right pushbutton (PAD6): shot clock start/stop
+; - left LED (PT1): shot clock run/stop state
+; - right LED (PT0): shot clock expired (00) state
+;
+; CAUTION: Be sure to set the DSO waveform generator output to produce a 
+;          5 V peak-to-peak square wave with +2.5 V offset
+;
+;========================================================================
+;
+; MC68HC9S12C32 REGISTER MAP
+
+INITRM	EQU	$0010	; INITRM - INTERNAL RAM POSITION REGISTER
+INITRG	EQU	$0011	; INITRG - INTERNAL REGISTER POSITION REGISTER
+
+; ==== CRG - Clock and Reset Generator
+
+SYNR	  EQU	$0034	; CRG synthesizer register
+REFDV 	EQU	$0035	; CRG reference divider register
+CRGFLG	EQU	$0037	; CRG flags register
+CRGINT	EQU	$0038
+CLKSEL	EQU	$0039	; CRG clock select register
+PLLCTL	EQU	$003A	; CRG PLL control register
+RTICTL	EQU	$003B
+COPCTL	EQU	$003C
+
+; ==== PORT M
+
+PTM	    EQU	$0250	; Port M data register (bit 3 will be used to clear device flag)
+DDRM  	EQU	$0252	; Port M data direction register
+
+; ==== Port AD - Digital Input (Pushbuttons)
+
+PTAD    EQU     $0270   ; Port AD data register
+DDRAD   EQU     $0272   ; Port AD data direction register
+ATDDIEN	EQU	$008D	; Port AD digital input enable
+			; (programs Port AD bit positions as digital inputs)
+
+; ==== Port T - docking module LEDs and external PLD interface
+
+PTT   	EQU	$0240	; Port T data register
+DDRT	  EQU	$0242	; Port T data direction register
+
+; ==== IRQ control register
+
+IRQCR	EQU	$001E	; (will use default state out of reset) 
+
+; ==== SCI Register Definitions
+
+SCIBDH	EQU	$00C8	; SCI0BDH - SCI BAUD RATE CONTROL REGISTER
+SCIBDL	EQU	$00C9	; SCI0BDL - SCI BAUD RATE CONTROL REGISTER
+SCICR1	EQU	$00CA	; SCI0CR1 - SCI CONTROL REGISTER
+SCICR2	EQU	$00CB	; SCI0CR2 - SCI CONTROL REGISTER
+SCISR1	EQU	$00CC	; SCI0SR1 - SCI STATUS REGISTER
+SCISR2	EQU	$00CD	; SCI0SR2 - SCI STATUS REGISTER
+SCIDRH	EQU	$00CE	; SCI0DRH - SCI DATA REGISTER
+SCIDRL	EQU	$00CF	; SCI0DRL - SCI DATA REGISTER
+
+;***********************************************************************
+;
+; ASCII character definitions
+;
+
+CR	 equ	$0d	; RETURN
+LF   equ  $0a ; LINE FEED
+
+; ======================================================================
+;
+;  Variable declarations (SRAM)
+;  Others may be added if deemed necessary
+
+
+intcnt	equ	$3800	; number of IRQ interrupts accumulated
+			          	; (set tenths flag when count reaches 10)
+tenths	equ	$3801	; one-tenth second flag
+leftpb	equ	$3802	; left pushbutton flag
+rghtpb	equ	$3803	; right pushbutton flag
+runstp	equ	$3804	; run/stop flag
+
+
+playclock  equ  $3805 ;play clock value is at address 0190
+tempB       equ  $3816 ;temporarily move the B register to a specific memory
+tempA       equ  $3827 ;tempoparily move the A register to a specific memory
+LEFTPB      equ  $3838
+RGHTPB     equ  $3849
+prevpb     equ   $3851
+;***********************************************************************
+;  BOOT-UP ENTRY POINT
+;***********************************************************************
+
+	org	$8000
+startup	sei			; Disable interrupts
+	movb	#$00,INITRG	; set registers to $0000
+	movb	#$39,INITRM	; map RAM ($3800 - $3FFF)
+	lds	#$3FCE		; initialize stack pointer
+
+;
+; Set the PLL speed (bus clock = 24 MHz)
+;
+
+	bclr	CLKSEL,$80	; disengage PLL from system
+	bset	PLLCTL,$40	; turn on PLL
+	movb	#$2,SYNR	; set PLL multiplier
+	movb	#$0,REFDV	; set PLL divider
+	nop
+	nop
+plp	brclr	CRGFLG,$08,plp	; while (!(crg.crgflg.bit.lock==1))
+	bset	CLKSEL,$80	; engage PLL 
+
+;
+; Disable watchdog timer (COPCTL register)
+;
+	movb	#$40,COPCTL	; COP off; RTI and COP stopped in BDM-mode
+
+;
+; Initialize asynchronous serial port (SCI) for 9600 baud, no interrupts
+; Note - for debugging use only
+;
+	movb	#$00,SCIBDH	; set baud rate to 9600
+	movb	#$9C,SCIBDL	; 24,000,000 / 16 / 156 = 9600 (approx)
+	movb	#$00,SCICR1	; $9C = 156
+	movb	#$0C,SCICR2	; initialize SCI for program-driven operation
+
+
+;***********************************************************************
+;  START OF CODE FOR EXPERIMENT 6
+;***********************************************************************
+;
+;  Flag and variable initialization (others may be added)
+;
+	clr	intcnt
+	clr	tenths
+	clr	leftpb
+	clr	rghtpb
+	clr	runstp
+ 
+  clr playclock ; clear whatever value was in the playclock
+  movw  #$0190,playclock; sets 19 to playclock
+ 
+;
+;  Initialize Port AD for use as a digital input port (for pushbuttons)
+;
+	clr	DDRAD		; program port AD for input mode
+	movb	#$C0,ATDDIEN	; program PTAD7 and PTAD6 pins as digital inputs
+
+;
+;  Initialize Port M to provide asynchronous reset to external device flag on bit 3
+;
+	bset	DDRM,$08		; configure pin 3 of Port M (PM3) as output signal
+	bset	PTM,$08	; send active high clear pulse to external device flag
+	bclr	PTM,$08	; return asynchronous clear signal to low state
+
+;
+;  < add any additional initialization code here >
+;
+
+
+	cli		; enable IRQ interrupts - last step before starting main loop
+;
+;  Start of main program-driven polling loop
+;
+main
+
+;  If the "tenth second" flag is set, then
+;    - clear the "then second" flag
+;    - If the "run/stop" flag is set, then
+;      + decrement the play clock value (stored as packed 4-digit BCD number)
+;      + update the 7-segment display
+;        o if the time remaining is greater than or equal to 10 seconds,
+;          display the tens and ones digits
+;        o if the time remaining is less than 10 seconds but
+;          greater than or equal to 1 second, blank the tens digit
+;          and only display the ones digit
+;        o if the time remaining is less than 1.0 second,
+;          turn on the middle decimal point and display
+;          the tenths digit instead of the ones digit
+;          (starting with .9 and ending with .0)
+;    - Endif
+;  Endif
+
+checktenflag    LDAA     tenths
+                CMPA     #01               ;checks if the tenthsecond flag is set
+                BEQ      cleartenflag        ;if it is then clear it
+                BNE      leftbuttonflag                
+      
+cleartenflag    CLRA
+                STAA     tenths
+                LDAB     runstp
+                CMPB     #01
+                BEQ      decrement
+                BNE      leftbuttonflag
+
+decrement       STAB     runstp
+                LDD      playclock
+                EXG      B,A
+                ADDA     #$99
+                DAA
+                EXG      A,B
+                ADCA     #$99
+                DAA
+                STD      playclock
+                                
+update          ANDB     #$F0           ;mask the low nibble of the B register
+                CMPB     #$0            ;check if it is equal to zero
+                BEQ      checktenspot   ;if it is then check if there is anything in the tens digit
+                BRA      dispones       ;if it is greater than zero then we display the ones digit
+                
+checktenspot    CMPA     #$0            ;check if there is anything in the tens digit
+                BEQ      dispdp         ;if there isnt anything then it must be a decimal display
+                BRA      distens        ;if there is then is must be a tens display
+                
+
+dispdp          STAB     tempB
+                BSET     tempB,PTT
+                BSET     $08,PTT
+                BRA      leftbuttonflag
+
+dispones        STAB     tempB           ;Store the value in register B to the temporary memory 
+                BSET     tempB,PTT       ;Set the value in the memory to PORT T                 
+                BRA      leftbuttonflag
+                
+distens         LSLA
+                LSLA
+                LSLA
+                LSLA
+                STAA     tempA
+                BSET     tempA,PTT                                                 
+                BSET     $04,PTT
+                BRA      leftbuttonflag
+                              
+;  If the left pushbutton ("reset play clock") flag is set, then:
+;    - clear the left pushbutton flag
+;    - clear the "run/stop" flag
+;    - turn off both the "run/stop" and "time expired" LEDs
+;    - reset the display to "19" 
+;  Endif
+
+leftbuttonflag  LDAA     leftpb           ;loading the left pushbutton flag in the register A
+                CMPA     #01              ;check if the flag is set
+                BEQ      clrlefbutflag    ;if it is branch to clear the left pushbutton flag    
+                BRA      rightbuttonflag  ;if it isn't then branch to the next flag (right button)
+
+clrlefbutflag   CLRA                      ;clear the left pushbuttong flag
+                STAA     leftpb           ;store the left pushbutton flag back
+                LDAA     runstp           ;load the run/stop flag
+                CLRA                      ;clear the run/stop flag
+                STAA     runstp           ;store the run/stop flag back
+                BSET     $94,PTT          ;Turns off the run/stop and time expired LED and sets display to 19
+                
+
+;  If the right pushbutton ("start/stop") flag is set, then
+;    - clear the right pushbutton flag
+;    - toggle the "run/stop" flag
+;    - toggle the "run/stop" LED
+;  Endif
+rightbuttonflag LDAA    rghtpb            ;load the right button flag to register A
+                CMPA    #01               ;check if flag is set
+                BEQ     clrrghtbutflg     ;if it is branch to clear the flag
+                BRA     checkplayclk      ;otherwise got to the next flag
+
+clrrghtbutflg   CLRA                      ;clear the flag
+                STAA    rghtpb            ;store back the value to the flag
+                BSET    $01,runstp        ;turn on the runstop flag
+                BSET    $00,runstp        ;turn off the runstop flag
+                BSET    $02,PTT           ;turn on the runstop LED
+                BSET    $00,PTT           ;turn off the runstop LED
+                
+;  If the play clock has reached ".0", then:
+;    - clear the "run/stop" flag
+;    - turn on the "time expired" LED
+;    - turn off the "run/stop" LED
+;  Endif
+
+checkplayclk    LDAA   playclock          ;load the play clock 
+                CMPA   #00                ;check if the clock is zero
+                BEQ    clrrunstpflg       ;if it is branch to clear the flag
+                BRA    reset              ;otherwise branch to reset
+
+clrrunstpflg    STAA   playclock          ;stores the playclock
+                LDAB   runstp             ;load the runstp flag to B register 
+                CLRB                      ;clear the runstop flag
+	              BSET   $00,PTT            ;turns off the both LEDs
+	              BRA    reset	
+	
+reset         	jmp	main	;  main is a while( ) loop with no terminating condition
+
+
+;***********************************************************************
+;
+; IRQ interrupt service routine
+;
+;  External waveform generator produces 100 Hz IRQ interrupt rate
+;
+;  Use INTCNT to determine when 10 IRQ interrupts have accumulated 
+;    -> set tenths flag and clear INTCNT to 0
+;
+;  Sample state of pushbuttons (PAD7 = left, PAD6 = right)
+;  If change in state from "high" to "low" is detected, set pushbutton flag
+;     leftpb (for PAD7 H -> L), rghtpb (for PAD6 H -> L)
+;     (pushbuttons are momentary contact closures to ground)
+;
+
+
+irq_isr
+;/*********From Lecture Notes******BEGIN
+; < place your code for the IRQ interrupt service routine here >
+; Check the pushbuttons for a change of state (compare previous with current)
+; If no change detected, exit service routine
+chkpb           ldaa PTAD ; read current state of pushbuttons
+                anda #$C0 ; mask off PTAD7 and PTAD6
+                cmpa prevpb ; compare with previous PB state
+                bne didchg ; if current state != previous state
+                rti ; figure out which pushbutton involved
+                    ; else, exit with no change
+; State of PB changed -- check if action necessary
+; Note: Not considering case when both PBs pressed simultaneously
+didchg          psha ; save current state of PB
+                     ; If previous state of left PB was "H" and current state is "L"
+                     ; then set ¡°LEFTPB" flag and proceed to exit; else, check right PB
+chklft
+                anda #$80 ; isolate current left PB
+                eora #$80 ; complement current left PB
+                psha
+                ldab prevpb
+                andb #$80 ; isolate previous left PB
+                andb 1,sp+
+                beq chkrgt ; if AND=0, left PB did not change from H->L so exit
+                           ; else, set LEFTPB flag
+                movb #$01,LEFTPB
+                bra rdone
+; If previous state of right PB was "H" and current state is "L"
+; then set "rghtpb" flag and proceed to exit
+chkrgt          ldaa 0,sp ; reload current PB state
+                anda #$40 ; isolate current right PB
+                eora #$40 ; complement current right PB
+                psha
+                ldab prevpb
+                andb #$40 ; isolate previous right PB
+                andb 1,sp+
+                beq rdone ; if AND=0, right PB did not change from H->L so exit
+                          ; else, set RGHTPB flag
+                movb #$01,RGHTPB
+; Since PB state changed, set PREVPB = current state read
+rdone           pula
+                staa prevpb ; update PB state
+; else, exit with no change
+; < be sure to clear external device flag by asserting bit 3 of Port M - see above >
+        rti
+;*********From Lecture Notes******END*/

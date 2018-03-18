@@ -1,0 +1,402 @@
+// ***********************************************************************
+//  ECE 362 - Experiment 6 - Fall 2014     
+//
+// Dual-channel LED bar graph display                    
+// ***********************************************************************
+//	 	   			 		  			 		  		
+// Completed by: < Young Jin Jung >
+//               < 0500-J >
+//               < 3 >
+//
+//
+// Academic Honesty Statement:  In entering my name above, I hereby certify
+// that I am the individual who created this HC(S)12 source file and that I 
+// have not copied the work of any other student (past or present) while 
+// completing it. I understand that if I fail to honor this agreement, I will 
+// receive a grade of ZERO and be subject to possible disciplinary action.
+//
+// ***********************************************************************
+
+#include <hidef.h>           /* common defines and macros */
+#include "derivative.h"      /* derivative-specific definitions */
+#include <mc9s12c32.h>
+
+// All funtions after main should be initialized here
+
+// Note: inchar and outchar can be used for debugging purposes
+
+char inchar(void);
+void outchar(char x);
+
+//  Variable declarations  	   			 		  			 		       
+int tenthsec = 0;  // one-tenth second flag
+int leftpb = 0;    // left pushbutton flag
+int rghtpb = 0;    // right pushbutton flag
+int runstp = 0;    // run/stop flag                         
+int rticnt = 0;    // RTICNT (variable)	 
+int prevpbl = 0;   // previous state of pushbuttons left (variable)
+int prevpbr = 0;	 // previous state of pushbuttons right (variable)
+int output0 = 0;
+int output1 = 0;
+int i = 0;
+
+
+
+#define THRESH5 0xd5       // 213   (5/6*256)
+#define THRESH4 0xaa       // 170
+#define THRESH3 0x80       // 128
+#define THRESH2 0x55       // 84
+#define THRESH1 0x2a       // 42    (1/6*256)
+
+
+
+
+	 	   		
+// Initializations
+
+ 
+void  initializations(void) {
+
+// Set the PLL speed (bus clock = 24 MHz)
+
+  		CLKSEL = CLKSEL & 0x80; // disengage PLL from system
+  		PLLCTL = PLLCTL | 0x40; // turn on PLL
+  		SYNR = 0x02;            // set PLL multiplier
+  		REFDV = 0;              // set PLL divider
+  		while (!(CRGFLG & 0x08)){  }
+  		CLKSEL = CLKSEL | 0x80; // engage PLL
+  
+// Disable watchdog timer (COPCTL register)
+
+      COPCTL = 0x40;    //COP off - RTI and COP stopped in BDM-mode
+
+// Initialize asynchronous serial port (SCI) for 9600 baud, no interrupts
+
+      SCIBDH =  0x00; //set baud rate to 9600
+      SCIBDL =  0x9C; //24,000,000 / 16 / 156 = 9600 (approx)  
+      SCICR1 =  0x00; //$9C = 156
+      SCICR2 =  0x0C; //initialize SCI for program-driven operation
+         
+//  Initialize Port AD pins 7 and 6 for use as digital inputs
+
+	    DDRAD = 0; 		//program port AD for input mode
+      ATDDIEN = 0xC0; //program PAD7 and PAD6 pins as digital inputs
+         
+//  Add additional port pin initializations here  (e.g., Other DDRs, Ports)
+
+			DDRT = 0xff;			// enable all the pins
+			PTT_PTT0 = 0;
+			PTT_PTT1 = 0; 
+			
+
+
+//  Define bar graph segment thresholds (THRESH1..THRESH5)
+//  NOTE: These are binary fractions
+
+											 
+
+//  Add RTI/interrupt initializations here
+
+			
+			
+			rticnt = 0;
+			ATDCTL2 = 0b10000000;				// ATD control reg 2 initialization (0x82, ATD enabled)  
+		  ATDCTL2_AFFC = 1;
+		  ATDCTL3 = 0b00010000;				// ATD control reg 3 initialization (0x10, Number of Conversions per Seq = 2)
+			ATDCTL4 = 0b10000101;				// ATD control reg 4 initialization (0x85)
+			ATDCTL5 = 0b00010000;				// ATD control reg 5 initialization (0x10)
+		
+			
+			RTICTL = 0b01110000;				// RTI control bit set initialization (0x70)
+			CRGINT = 0b10000000;				// CRG interrup enable register initialization (0x80)
+			
+
+}
+	 		  			 		  		
+ 
+// Main (non-terminating loop)
+ 
+void main(void) {
+	initializations(); 		  			 		  		
+	EnableInterrupts;
+
+
+  for(;;) {
+  
+  
+  if (tenthsec)
+  {
+    
+    tenthsec = 0;               // clear the tenthsec flag
+    if (runstp)
+    {
+    	ATDCTL5 = 0b00010000;     //Initiate ATD conversion seq
+    	while ((ATDSTAT0 & 0x80)!= 0x80)
+    	{                           
+    	  // if the sequence is not complete, wait until it is completed. (SCF = 0)
+    	  // Necessary?  
+    	}
+    	
+    	
+    	output0 = 0;
+    	output1 = 0;
+    	
+    	// apply thresholds to converted values
+    	// channel 0
+    	if ((0x10 < ATDDR0H) && (ATDDR0H < THRESH1))          // adjust the lowest threshhold to avoid unstable output
+    	{
+    	  output0 = 1;
+    	}
+    	if ((THRESH1 <= ATDDR0H) && (ATDDR0H < THRESH2))
+    	{
+    	  output0 = 2; 
+    	}
+    	if ((THRESH2 <= ATDDR0H) && (ATDDR0H < THRESH3))
+    	{
+    	  output0 = 3;
+    	}
+    	if ((THRESH3 <= ATDDR0H) && (ATDDR0H < THRESH4))
+    	{
+    	  output0 = 4;
+    	}
+    	if (((THRESH4 <= ATDDR0H) && (ATDDR0H < THRESH5)) || (ATDDR0H >= THRESH5))
+    	{
+    	  output0 = 5;
+    	}
+    	//transmit(output0);
+    	
+    	// channel 1
+    	if ((0x10 < ATDDR1H) && (ATDDR1H < THRESH1))          // adjust the lowest threshhold to avoid unstable output
+    	{
+    	  output1 = 1;
+    	}
+    	if ((THRESH1 <= ATDDR1H) && (ATDDR1H < THRESH2))
+    	{
+    	  output1 = 2; 
+    	}
+    	if ((THRESH2 <= ATDDR1H) && (ATDDR1H < THRESH3))
+    	{
+    	  output1 = 3;
+    	}
+    	if ((THRESH3 <= ATDDR1H) && (ATDDR1H < THRESH4))
+    	{
+    	  output1 = 4;
+    	}
+    	if (((THRESH4 <= ATDDR1H) && (ATDDR1H < THRESH5)) || (ATDDR1H >= THRESH5))
+    	{
+    	  output1 = 5;
+    	}
+    	//transmit(output1);    	 
+    	
+      
+      
+      //determine 5-bit bar graph bit setting for each input channel
+      //transmit 10-bit data to external shift register
+      
+      for (i = 0; i < 10; i++)
+      {
+        PTT_PTT4 = 0;             // PT4 = Clk
+        if (i < 5)
+        {
+          if(output0 > 0)
+          {
+            PTT_PTT3 = 1;         // PT3 = data input
+            output0--;
+          } else 
+          {
+            PTT_PTT3 = 0;
+          }
+        } else 
+        {
+          if (output1 > 0)
+          {
+            PTT_PTT3 = 1;
+            output1--;
+          } else 
+          {
+            PTT_PTT3 = 0;
+          }
+        }
+        PTT_PTT4 = 1;
+          
+      }
+    }
+  }
+  
+  if (leftpb)
+  {
+    
+    leftpb = 0;
+    runstp = 0;
+    PTT_PTT0 = 0;       // Turn off right LED (PT0)
+    PTT_PTT1 = 1;       // Turn on left LED (PT1)
+  }
+  
+  if (rghtpb)
+  {
+    
+    rghtpb = 0;
+    runstp = 1;
+    PTT_PTT0 = 1;       // Turn on right LED (PT0)
+    PTT_PTT1 = 0;       // Turn off left LED (PT1)
+  }
+
+    
+    
+      
+      
+
+
+// Main program loop (state machine)
+// Start of main program-driven polling loop
+
+	 	   			 		  			 		  		
+//  If the "tenth second" flag is set, then
+//    - clear the "tenth second" flag
+//    - if "run/stop" flag is set, then
+//       - initiate ATD coversion sequence
+//       - apply thresholds to converted values
+//       - determine 5-bit bar graph bit settings for each input channel
+//       - transmit 10-bit data to external shift register
+//    - endif
+//  Endif
+
+	 	   			 		  			 		  		
+//  If the left pushbutton ("stop BGD") flag is set, then:
+//    - clear the left pushbutton flag
+//    - clear the "run/stop" flag (and "freeze" BGD)
+//    - turn on left LED/turn off right LED (on docking module)
+//  Endif
+   			 		  			 		  		
+
+//  If the right pushbutton ("start BGD") flag is set, then
+//    - clear the right pushbutton flag
+//    - set the "run/stop" flag (enable BGD updates)
+//    - turn off left LED/turn on right LED (on docking module)
+//  Endif
+	 	   			 		  			 		  		
+
+  } /* loop forever */
+} /* make sure that you never leave main */
+
+
+
+// ***********************************************************************                       
+// RTI interrupt service routine: rti_isr
+//
+//  Initialized for 5-10 ms (approx.) interrupt rate - note: you need to
+//    add code above to do this
+//
+//  Samples state of pushbuttons (PAD7 = left, PAD6 = right)
+//
+//  If change in state from "high" to "low" detected, set pushbutton flag
+//     leftpb (for PAD7 H -> L), rghtpb (for PAD6 H -> L)
+//     Recall that pushbuttons are momentary contact closures to ground
+//
+//  Also, keeps track of when one-tenth of a second's worth of RTI interrupts
+//     accumulate, and sets the "tenth second" flag         	   			 		  			 		  		
+ 
+
+interrupt 7 void RTI_ISR( void)
+{
+ // set CRGFLG bit to clear RTI device flag
+  	CRGFLG = CRGFLG | 0x80;
+  	
+  	
+  	/* PAD = 0 PREV = 0 -> Button is pressed currently, but it wasn't pressed previously
+  	   PAD = 0 PREV = 1 -> Button is pressed currently, and it was pressed previously
+  	   PAD = 1 PREV = 0 -> Button is not pressed currently, and it wasn't pressed previously
+  	   PAD = 1 PREV = 1 -> Button is not pressed currently, but it was pressed previously
+  	*/
+  	if((PORTAD0_PTAD7 + prevpbl) == 0)        // if left button is pressed and detected high to low edge
+  	{
+  		prevpbl = 1;                            // set previous push button left 
+  		leftpb = 1;                             // set push button left 
+  	} else if (PORTAD0_PTAD7)                 // if left putton is not pressed
+  	{
+  		prevpbl = 0;                            // clear previous push button left
+  	}
+  	
+  	if((PORTAD0_PTAD6 + prevpbr) == 0)
+  	{
+  	  prevpbr = 1;
+  	  rghtpb = 1;
+  	} else if (PORTAD0_PTAD6)
+  	{
+  	  prevpbr = 0;
+  	}
+  	  
+  	
+  	
+  	if (rticnt == 10) {
+  	  tenthsec = 1;
+  	  rticnt = 0;
+  	} else
+  	{
+  	  rticnt++;  
+  	}
+  	
+  	  
+	
+
+}
+
+
+// ***********************************************************************
+// Character I/O Library Routines for 9S12C32 (for debugging only)
+// ***********************************************************************
+// Name:         inchar
+// Description:  inputs ASCII character from SCI serial port and returns it
+// ***********************************************************************
+char  inchar(void) {
+  /* receives character from the terminal channel */
+        while (!(SCISR1 & 0x20)); /* wait for RDR input */
+    return SCIDRL;
+ 
+}
+
+// ***********************************************************************
+// Name:         outchar
+// Description:  outputs ASCII character passed in outchar()
+//                  to the SCI serial port
+// ***********************************************************************/
+void outchar(char ch) {
+  /* transmits a character to the terminal channel */
+    while (!(SCISR1 & 0x80));  /* wait for TDR empty */
+    SCIDRL = ch;
+}
+
+/*void transmit(int outputValue)
+{
+  int out = outputValue;
+  
+  for (i = 0; i < 5; i++)
+      {
+        PTT_PTT4 = 0;             // PT4 = Clk
+        if (i < 5)
+        {
+          if(out > 0)
+          {
+            PTT_PTT3 = 1;         // PT3 = data input
+            out--;
+          } else 
+          {
+            PTT_PTT3 = 0;
+          }
+        }
+      }
+        else 
+        {
+          if (output1 > 0)
+          {
+            PTT_PTT3 = 1;
+            output1--;
+          } else 
+          {
+            PTT_PTT3 = 0;
+          }
+        }
+        PTT_PTT4 = 1;
+          
+      }
+}*/
